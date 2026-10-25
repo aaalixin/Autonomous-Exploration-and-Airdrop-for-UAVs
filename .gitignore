@@ -1,0 +1,57 @@
+# ---------- ROS 2 build artifacts ----------
+build/
+install/
+log/
+.simrun/build/
+.simrun/install/
+.simrun/logs/
+.simrun/roshome/
+.simrun/results/
+.simrun/__pycache__/
+__pycache__/
+*.pyc
+*.o
+*.so
+
+# ---------- flight data / bags / logs ----------
+rosbags/
+nx_bags/
+nx_logs/
+.jetson_logs/
+*.db3
+*.mcap
+*.log
+.sim_*.log
+
+# ---------- local backups & scratch ----------
+*.bak
+*.bak_*
+*.orig
+backup_*/
+.nx_before/
+.src_mine_backup/
+.rosgui/
+.claude/
+from_nx/
+.simrun/*.out
+.simrun/log_*.out
+.simrun/out_*.log
+.*_check.py
+.cal_*.py
+.cap2.py
+.drop5.py
+odom_view.py
+node*.txt
+nvd.txt
+
+# ---------- media ----------
+*.jpg
+*.jpeg
+*.png
+*.mp4
+
+# stale root-level CMakeLists (does not belong to the ROS packages)
+/CMakeLists.txt
+
+# keep the airframe photo used by README
+!docs/drone.jpg
