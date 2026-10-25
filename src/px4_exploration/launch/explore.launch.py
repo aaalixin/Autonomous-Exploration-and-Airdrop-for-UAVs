@@ -10,289 +10,167 @@ FOV模式：向下相机FOV或前向相机FOV（可配置）
 from launch import LaunchDescription
 from launch_ros.actions import Node
 
-
 def generate_launch_description():
     return LaunchDescription([
         Node(
             package='px4_exploration',
             executable='px4_exploration_node',
             name='px4_exploration_node',
-            output='both',   # ★screen+log 双写: 每次飞行完整日志自动存 ~/.ros/log/.../px4_exploration_node-*.log ✓ (出问题不用靠 bag, 也不会因中断损坏 ✓)
+            output='both',
             parameters=[{
-                # ===== 传感器话题 =====
-                'sensor_topic': '/cloud_registered',   # ★本帧全密度扫描(世界系 camera_init ~10Hz): 动态的人走开下一帧就消失 ✓
-                'position_topic': '/Odometry',           # FastLIO里程计定位
+                'sensor_topic': '/cloud_registered',
+                'position_topic': '/Odometry',
 
-                # ===== 相机内参(用于FOV计算) =====
-                'cam_width': 1280,                       # 图像宽度(像素)
-                'cam_height': 720,                       # 图像高度(像素)
-                'cam_fx': 689.74,                        # 焦距fx(像素)
-                'cam_fy': 690.02,                        # 焦距fy(像素)
-                'cam_cx': 643.12,                        # 光心cx(像素)
-                'cam_cy': 361.61,                        # 光心cy(像素)
+                'cam_width': 1280,
+                'cam_height': 720,
+                'cam_fx': 689.74,
+                'cam_fy': 690.02,
+                'cam_cx': 643.12,
+                'cam_cy': 361.61,
 
-                # ===== FOV模式选择 =====
-                'use_downward_fov': 0,                   # 1=向下FOV(地面矩形), 0=前向FOV(扇形)
+                'use_downward_fov': 0,
 
-                # ===== 传感器模型 =====
-                'lidar_range': 10.0,                     # 障碍物检测最大距离(米)
-                'height_band': 0.35,                     # ★0.2→0.3: 探索段高度带加宽(飞机高度±0.3m), 能看见更矮/更高的障碍 ✓
-                # ★A→B(通道)段专用: 用【无人机自身高度 ± 这个半带宽】取点云(不是固定高度范围 ✗)
-                #   通道里 Z 有偏移(命令0.5实际快着地) → 固定范围会把点云滤没; 跟随高度才安全
+                'lidar_range': 10.0,
+                'height_band': 0.35,
                 'ab_cloud_h_band': 0.1,
-                'explore_cloud_h_up': 0.10,   # ★探索段: 当前高度以上 0.1m (相对无人机当前高度 ✓)
-                'explore_cloud_h_down': 0.40,   # ★探索段: 当前高度以下 0.4m (相对无人机当前高度 ✓)
-                'ab_cloud_h_up': 0.00,   # ★A→B段: 当前高度以上 0 (相对无人机当前高度 ✓)
-                'ab_cloud_h_down': 0.20,   # ★A→B段: 当前高度以下 0.2m (相对无人机当前高度 ✓)
+                'explore_cloud_h_up': 0.10,
+                'explore_cloud_h_down': 0.40,
+                'ab_cloud_h_up': 0.00,
+                'ab_cloud_h_down': 0.20,
 
-                # ★返航固定高度范围点云: 过探索区角点(开始降通道高度)后, 建图不再跟随无人机
-                #   当前高度, 只用固定高度带内的点。否则降高时"高度带"往下扫, 每帧清掉前向扇区
-                #   重标 → 地图变得不完整 → 到 A 附近容易失误。
-                'use_return_cloud': 1,                   # 1=启用上面的切换; 0=始终用无人机当前高度附近
-                'return_cloud_h_min': 0.10,              # ★固定高度带下限(世界系, m) —— 通道高0.6 就填 0.30
-                'return_cloud_h_max': 0.40,              # ★固定高度带上限(世界系, m)
-                'return_cloud_clear_map': 1,             # 1=切换瞬间整张障碍图清空重建(只保留新范围点云); 0=只按平时前向扇区清
-                # ★虚拟通道右墙(自建场地没有围墙时用; 比赛场地封闭了就设 0)
-                #   给一个世界系坐标点 = "通道入口处右边墙的边缘位置"; 算法从该点沿 -y 一直标到
-                #   地图 y 下边界, 整条线当障碍物(GUI 会直接画出来) → 无人机到左上角后不会从
-                #   场地外面绕过去飞 B, 只能按通道路径规划。
-                'use_corridor_wall': 0,                  # 1=启用虚拟右墙; 0=不启用
-                'corridor_wall_x': 10.34,   # ★现场实测: 地图围墙 x=10.34 ✓ (原 8.5 夹在通道中间 ✗ 才劈出假口 ✗)
-                'corridor_wall_y': 4.0,     # ★从地图上边界(y=4.0)往下标到地图下边界 ✓ 覆盖整个通道
-                # ★第二道虚拟墙(生成逻辑与上面完全相同: 从该点往 -y 标到地图下边界)
-                'use_corridor_wall2': 0,   # ★开启第二道虚拟墙(入口左端) ✓
-                'corridor_wall2_x': 9.1,     # ★现场实测: 入口左端 x = 9.1 ✓
-                'corridor_wall2_y': 3.1,     # ★从入口(y=3.1)往下标到地图下边界 ✓
-                'fov_max_range': 2.6,                    # 前视相机FOV覆盖最远距离(米) (仅前向FOV模式使用; 按内参/安装角)
-                'gui_fov_range': 5.0,                    # GUI绿色扇形射线显示长度(米), 仅显示用, 不影响覆盖标记
-                'fov_tilt_deg': 55.0,                    # 前视相机光轴下倾角(度,相对水平面); 横向视野按内参≈86°
-                'fov_h_deg': -1.0,                       # 前视相机水平FOV(度); ≤0=按相机内参自动算(当前自动, 实测≈86°)
+                'use_return_cloud': 1,
+                'return_cloud_h_min': 0.10,
+                'return_cloud_h_max': 0.40,
+                'return_cloud_clear_map': 1,
+                'use_corridor_wall': 0,
+                'corridor_wall_x': 10.34,
+                'corridor_wall_y': 4.0,
+                'use_corridor_wall2': 0,
+                'corridor_wall2_x': 9.1,
+                'corridor_wall2_y': 3.1,
+                'fov_max_range': 2.6,
+                'gui_fov_range': 5.0,
+                'fov_tilt_deg': 55.0,
+                'fov_h_deg': -1.0,
 
-                # ===== 无人机动力学 =====
-                'max_speed': 0.55,                        # 最大飞行速度(米/秒) —— 按现场要求保持 0.55 不动 ✓
-                'max_accel': 1.4,                         # 最大加速度(米/秒²) —— 保持原值 ✓
-                'max_yaw_rate': 0.5,                     # 最大偏航角速度(弧度/秒)
+                'max_speed': 0.55,
+                'max_accel': 1.4,
+                'max_yaw_rate': 0.5,
 
-                # ===== 起飞 =====
-                'takeoff_height': 1.2,                   # 目标飞行高度(米)
-                'takeoff_speed': 0.7,                   # 起飞/降落垂直速度(米/秒)
+                'takeoff_height': 1.2,
+                'takeoff_speed': 0.7,
 
-                # ===== 探索参数 =====
-                'explore_threshold': 95.0,               # 探索覆盖率阈值(百分比)
-                'inflation_radius_dm': 3.0,               # ★5.0→4.0 (0.40m): 按现场要求 ✓ (只作用于探索区 ✓)
-                                                         #  与栅格分辨率无关(内部按 GRID_RES 换算成格数)
-                                                         #  !必须写小数(3.0), 写整数 3 会因参数类型不符启动报错
-                'distance_threshold': 0.10,              # 到达路径终点判定距离(米, 要求<10cm)
-                'extend_ratio': 0.3,                     # 延伸触发比例: 剩余 < 总长×比例时触发
-                'replan_interval': 0.5,                  # EGO式重规划周期(秒): MOVE中每隔此时间从实时位置重规划到同目标
-                'go_home_speed': 0.4,                    # 回家巡航速度(米/秒)
-                'corner_speed': 0.6,                     # 探索完→探索区角点速度(米/秒)
-                # ★探索完成后先飞到哪个"左上角点"(世界系, m): 不填(-999)=自动(探索区边界内缩0.5m)
-                #   你场地探索区 x[-0.5,7.0] y[-3.2,3.3] → 自动值 = (6.5, 2.8)
-                'home_corner_x': 5.55,          # 返航角点 x
-                'home_corner_y': 3.95,          # 返航角点 y (现场给定 ✓ 不要动)
+                'explore_threshold': 95.0,
+                'inflation_radius_dm': 3.0,
+                'distance_threshold': 0.10,
+                'extend_ratio': 0.3,
+                'replan_interval': 0.5,
+                'go_home_speed': 0.4,
+                'corner_speed': 0.6,
+                'home_corner_x': 5.55,
+                'home_corner_y': 3.95,
 
+                'use_gui': 0,
+                'fov_divider': 5,
+                'use_global_cloud': 1,
+                'cloud_max_hz': 1.0,
+                'cloud_subsample': 2,
+                'accumulate_all_cloud': 1,
 
-                # ===== 调试GUI =====7
-                'use_gui': 0,                            # 是否开启SDL2可视化 (0=关, 1=开)
-                'fov_divider': 5,                        # FOV覆盖标记分频: 控制50Hz ÷ 5 = 10Hz(无人机20ms只走1cm, FOV覆盖2.2x1.3m, 再高纯重复)
-                'use_global_cloud': 1,                   # 1=全局点云, 0=仅前向180°点云
-                'cloud_max_hz': 1.0,                       # ★点云处理限频1Hz: /cloud_registered 10Hz 全密度会拖死主循环(丢OFFBOARD) ✗ → 1Hz ✓; 0=不限
-                'cloud_subsample': 2,   # ★8→2: 抽样8倍会把【薄障碍】(柱子/挡板只被少数点命中)抽掉 ✗ → 图里消失 → 下一条规划穿过去撞上 ✗✓ → 改成2(保留障碍 ✓, 建图约慢3倍但不再丢障碍)
-                'accumulate_all_cloud': 1,             # ★全场累加点云(1=不清探索区外 ✓; 0=旧行为)
+                'map_x_min': -1.0,
+                'map_x_max': 8.5,
+                'map_y_min': -4.55,
+                'map_y_max': 4.55,
 
-                # ===== SLAM地图矩形范围(米) =====
-                'map_x_min': -1.0,                       # 全图X最小值
-                'map_x_max': 8.5,                        # 全图X最大值
-                'map_y_min': -4.55,                       # 全图Y最小值
-                'map_y_max': 4.55,                        # 全图Y最大值
-
-                # ===== 探索子区(米) =====
-                # 探索只发生在此子矩形内(自由空间标记/覆盖率/探索目标)。
-                'explore_x_min': -0.5,                   # 探索区X最小
-                'explore_x_max': 6.1,                    # 探索区X最大
-                'explore_y_min': -3.7,                   # 探索区Y最小
-                'explore_y_max': 3.7,                    # 探索区Y最大
-                'edge_margin': 0.2,                      # 视点/目标点距探索区(及地图)边缘的最小距离(m); 防止把视点选到墙边
-                # ★探索策略: x >= 该值的目标一律优先, 更小的(起飞点附近)放最后探索; -999=关闭
+                'explore_x_min': -0.5,
+                'explore_x_max': 6.1,
+                'explore_y_min': -3.7,
+                'explore_y_max': 3.7,
+                'edge_margin': 0.2,
                 'explore_far_first_x': 0.3,
-                # ★选点安全/绕远: 评估前 N 个候选, 用实际A*路径长度+沿途离障余量+航向取最优
-                'explore_pick_topn': 2,                  # ★6→2: 每个候选都要跑一次真A*, 6个在2.5cm图上要好几秒(卡顿主因) ✗
-                'explore_safe_clear': 0.40,              # 期望沿途离障余量(m, 仅 safe_w>0 时起作用)
-                'explore_safe_w': 0.0,                   # ★0=不用(膨胀0.30m+机体0.25m已保证安全余量); >0 才额外偏好离障远
+                'explore_pick_topn': 2,
+                'explore_safe_clear': 0.40,
+                'explore_safe_w': 0.0,
 
-                # ===== 返航/降落模式 =====
-                # flight_mode 0 → 探索完先到探索区角点, 再飞 pad_a(左上) 用 go_home_speed 降落
-                # flight_mode 1 → 探索完先到角点→pad_a(走廊入口), 再用和探索一样的A*规划直接飞 pad_b 降落
-                #                  (不找窄口中点/不拼折线; 走廊段不加膨胀, A* 自己穿窄口)
-                # flight_mode 2 → 与 1 相同进走廊, 但目标点取"第一个窄口中点再沿 -y 0.5m", 到点即降落
-                # flight_mode 3 → 不进走廊也不走角点: A* 直接回起飞点(origin)原地降落
-                'flight_mode': 1,                        # 0=探索完到角点→飞padA降落  1=进走廊→A*直飞padB降落
-                                                         # 2=A*飞到第一个窄口中点-0.5m就降落
-                                                         # 3=★投放完/探索完直接A*回起飞点原地降落(不进走廊; 通道可能过不去, 最保险)
-                'corridor_height': 0.4,                  # 返航过探索角点后的通道飞行高度(世界系, m)
-                'corner_h_tol': 0.10,                    # ★过角点降到通道高度的"到位"判定(m); 高度振荡大可放宽到 0.15
-                'corner_h_wait_secs': 6.0,               # ★上面这步最多等多久(s): <0=一直等(死等), 0=不等待直接飞
-                                                         #  到位/超时都锁存, 之后不再因 z 漂移反复关闸门
-                'ab_edge_margin': 0.35,   # A→B段规划边缘距离(m); 整格量化。仿真A/B(带惯性+4道0.8m口): 0.30→余量+4cm(薄), 0.33→+6~9cm ✓ → 0.35 更足 ✓
-                                                         #   实际生效≈floor(值/0.05)*0.05 → 5cm分辨率请用 0.30/0.35/0.40
-                                                         #   (0.30=实际0.30, 真净距≥5cm; 0.8m窄口余量26cm)
-                # ★通道路径规划方式
-                #   0 = 保守A*(现在的做法): A*+LOS剪枝+直线加密, 斜线直接穿各窄口中点
-                #   1 = 先x再y 轴对齐: 先横移到口中点x → 沿-y穿口 → 过口后再多走 overshoot,
-                #       再去下一个口; 最后先x到目标x、再y到目标y(折线压到障碍会退回 A*)
-                'ab_path_mode': 1,   # ★回到1: 现场通道里有窄墙/口子 ✗ 必须穿口中点 ✓ (0=保守A*只适合无口通道)
-                # ★规划线程: 1=同步(原行为, 每条轨迹算完前主循环卡住几秒); 0=后台线程(不卡, 推荐试)
-                'planner_sync': 1,   # ★回到原值(同步) —— 原来一直用这个 ✓; 之前改0是为了绕开778ms建图 ✗ 现在建图已用抽样修好 ✓ 不再需要异步 ✓
-                'ab_axis_overshoot': 0.3,                # mode1: 每个口中点过 y 后再多走的距离(m)
-                'ab_axis_lead': 0.8,                     # ★提前并线距离(m): 离口子0.8m就斜着并到中线 ✓ (现场口子间距更小 → 0.8)
-                'ab_axis_x_speed': 0.25,                 # ★mode1: 横移(x)段限速(m/s) —— 沿x冲太快拐回-y刹不住; 建议 0.20~0.25
-                                                         # 实测(机身半径0.25m): 0.25 → 真实间隙仅0.21m → 窄口擦墙; 0.35 → 0.30m, 配合离障推进后 0.34m。
-                                                         # 无解时会每次自动放宽5cm(下限0.30m)并打印 [GH] corridor plan: margin ...; 0.40 在本场地无解。
-                'pad_a_x': 7.6,                          # pad A x(降落走廊入口)
-                'pad_a_y': 3.95,                          # pad A y(左上)
-                'pad_b_x': 7.6,                          # pad B x(真正降落pad)
-                'pad_b_y': -4.05,                         # pad B y(右下/通道尽头)
-                'channel_speed': 0.3,                    # A→B 通道段巡航速度(米/秒) —— 窄口处会按净距自动降到 0.25/0.15
-                'ab_vel_ff': 1.0,                        # A→B 速度前馈比例: 1=按 channel_speed 飞; 0=只发位置点(会慢到 ~0.17m/s, 别用); 现场若侧偏可调 0.5
+                'flight_mode': 1,
+                'corridor_height': 0.4,
+                'corner_h_tol': 0.10,
+                'corner_h_wait_secs': 6.0,
+                'ab_edge_margin': 0.35,
+                'ab_path_mode': 1,
+                'planner_sync': 1,
+                'ab_axis_overshoot': 0.3,
+                'ab_axis_lead': 0.8,
+                'ab_axis_x_speed': 0.25,
+                'pad_a_x': 7.6,
+                'pad_a_y': 3.95,
+                'pad_b_x': 7.6,
+                'pad_b_y': -4.05,
+                'channel_speed': 0.3,
+                'ab_vel_ff': 1.0,
 
-                # ===== 视觉目标任务 =====
-                # 探索阶段收到 /detected_object_id(x,y=雷达系坐标, z=类别id):
-                # A* 规划飞过去 → 对准目标中心 → 飞到投放口偏移点 → 降到 drop_height
-                # → 降落后再对准记录位置 → 串口投放 → 原地停留 → 记该类别已完成。
-                #
-                # 类别策略:
-                #   优先类别 0,1,5 → 优先飞的 3 个类别; 不按类别号排序, 这 3 个里
-                #                    谁先被识别到就先飞谁(先到先飞)
-                #   回退类别 3,2   → 只在探索进度 >= vision_fallback_pct 后才允许飞,
-                #                    用来把总数补齐; 按 3 → 2 的顺序
-                #   过滤类别 4     → 直接丢弃(今年场地没这个目标 = 误识别)
-                #   其它类别       → 丢弃
-                # 总数 vision_total=3(现场只投3个标靶):
-                #   优先类别凑满3个 → 立即返航(不再飞回退目标);
-                #   进度到 vision_fallback_pct 还没凑满3个 → 用回退类别补齐;
-                #   飞满3个 → 立即返航(不等探索阈值)。标靶没飞满时探索器不会
-                #   因覆盖率达标提前返航(暂缓), 处理完再走正常返航流程。
-                'vision_topic_prefix': '/detected_object_class',  # ★视觉每类一个话题: <前缀><类别号> → /detected_object_class0 / 1 / 2 / 3 / 5
-                'vision_class_list': '0,1,2,3,5',        # ★要订阅的类别(今年5个目标; 4号没有目标, 视觉端不发该话题数据)
-                'vision_hold_secs': 0.2,                 # 投放后原地停留时长(秒, 等投放机构动作完成)
-                'vision_reach_tol': 0.45,        # ★机体到 0.4m 就算到达 → 悬停采样 → 边降边飞偏移
-                # ★到中心 10cm 内后, 用位置环飞"投放口偏移", 横向速度上限(m/s):
+                'vision_topic_prefix': '/detected_object_class',
+                'vision_class_list': '0,1,2,3,5',
+                'vision_hold_secs': 0.2,
+                'vision_reach_tol': 0.45,
                 'vision_offset_speed': 0.10,
-                # ★机头锁定: 1=到目标10cm内锁死(默认); 0=旧行为(机头跟路径/运动方向变)
-                'vision_lock_yaw': 1,            # ★1=发固定偏航(到中心锁存), 避免机头追测量值来回晃
-                # ★高空对准(口↔目标中心)判据与独立超时 —— 与低空的 drop_final_tol/drop_try_secs 分开
-                'drop_offset_tol': 0.06,   # ★高空: 投放口↔目标中心 判据(m) —— 偏移在高空飞完
-                'drop_offset_try_secs': 10.0,   # 高空对准超时(s): 超时不再等, 直接采基准点下降
-                # ★先稳一下再对准(防前视相机快到位时目标偏到视野边缘 → 投影中心偏):
-                #   飞到离目标 vision_near_dist 内 → 先【纯悬停】vision_near_hold_secs(不采样,
-                #   等无人机稳) → 然后才采 drop_align_frames 帧【视觉坐标】取中位数=基准点
-                #   → 再飞基准点正上方(vision_reach_tol) → 原地下降
-                # ★飞目标→降落前 的流程切换:
-                #   0 = 旧模式: 直接飞到目标中心(容差 vision_reach_tol) → 悬停采
-                #       drop_align_frames 帧【视觉坐标】中位数=基准点 → 原地下降
-                #   1 = 新模式: 先飞到距目标 vision_near_dist(0.7m) → 纯悬停
-                #       vision_near_hold_secs(0.5s, 不采样)稳定 → 再采 drop_align_frames 帧
-                #       【视觉坐标】中位数=基准点 → 再飞中心正上方 → 原地下降
-                # ★视觉瞄准点滤波(消除"在目标附近来回蹭"): 死区(m) + 一阶低通系数(0~1)
-                'vision_aim_deadband': 0.0,              # 0=不过滤(旧版行为); >0=死区滤抖动
-                'vision_aim_alpha': 1.0,                 # 1.0=不过滤(旧版行为); 0.2~0.5=平滑
+                'vision_lock_yaw': 1,
+                'drop_offset_tol': 0.06,
+                'drop_offset_try_secs': 10.0,
+                'vision_aim_deadband': 0.0,
+                'vision_aim_alpha': 1.0,
                 'vision_approach_mode': 0,
-                # ★无可用路径时: 距目标点在此范围内直接位置环靠近(不再反复重规划,
-                #   否则视觉坐标逐帧抖动 → 目标附近剧烈来回)
                 'vision_nopath_free_m': 0.60,
-                # ★进入阈值后减速慢蹭(视角稳定→视觉坐标稳定; 也不冲过头):
-                # ★距目标 0.5m 内: 直接位置环 + 比例速度前馈(平滑滑入, 不急停)
-                'vision_near_dist': 0.80,                # 进这个距离就切直接位置环
-                'vision_near_kff': 0.6,                  # ★前馈增益: 它和PX4位置环叠加, 1.2太大→冲过头
-                'vision_near_vmax': 0.3,                # ★前馈速度上限(m/s): 想更慢就 0.20
-                'vision_near_vmin': 0.2,                # ★前馈速度下限(m/s)
+                'vision_near_dist': 0.80,
+                'vision_near_kff': 0.6,
+                'vision_near_vmax': 0.3,
+                'vision_near_vmin': 0.2,
                 'vision_slow_dist': 0.0,
-                'vision_slow_speed': 0.05,               # 减速后的速度(m/s)
-                #   注意: 这两项只在 vision_approach_mode=1(新模式) 下生效
-                'vision_near_hold_secs': 2.5,            # ★到阈值后悬停时长(s): 一直给锁存点
-                'vision_timeout': 1.5,                   # 视觉数据中断超时(秒) → 放弃该目标恢复探索
-                'vision_jump_tol': 1.5,                  # ★同一类别相邻帧位置突变超过此值(m) → 判为投影跳点, 丢弃该帧
-                                                         #  (无人机最多0.8m/s, 0.5s 内位置突变 1.5m 必是坏帧)
-                'vision_lost_secs': 3.0,                 # ★目标暂时不在视野(常在FOV边缘时有时无)时:
-                                                         #  这期间【继续朝最后一次收到的位置飞】(坐标是粘住的),
-                                                         #  飞过去往往就重新进视野; 失联超过这个秒数才放弃并恢复探索。
-                                                         #  0/负 = 退回旧行为(用 vision_timeout=1.5s 就放弃)
-                'vision_dedup_radius': 1.0,              # ★已投放点去重半径(m): 新目标在此半径内视为同一物体 → 跳过, 不再重复投放
-                                                         #   (同一物体被误判成两个类别 + SLAM 漂移, 0.5 会重复投放; 标靶间距小就调小)
-                'vision_total': 3,                       # 总任务: 飞满几个标靶就直接返航(现场只投3个)
-                'fov_mark_while_vision': 1,      # ★飞视觉目标期间是否继续做FOV覆盖(1=标 ✓ 投放后不再走老路 ✓; 0=旧行为 ✗)
-                'vision_fallback_pct': 90.0,             # 探索进度达到该%后, 才允许飞"回退类别"补齐总数
-                'vision_priority_classes': '0,1,5',      # 优先飞的3个类别(不排序号, 先识别到先飞)
-                'vision_fallback_classes': '3,2',        # 回退类别(按此顺序, 仅在进度达标后启用)
-                'vision_filter_classes': '4',            # 直接过滤的类别(误识别)
+                'vision_slow_speed': 0.05,
+                'vision_near_hold_secs': 2.5,
+                'vision_timeout': 1.5,
+                'vision_jump_tol': 1.5,
+                'vision_lost_secs': 3.0,
+                'vision_dedup_radius': 1.0,
+                'vision_total': 3,
+                'fov_mark_while_vision': 1,
+                'vision_fallback_pct': 90.0,
+                'vision_priority_classes': '0,1,5',
+                'vision_fallback_classes': '3,2',
+                'vision_filter_classes': '4',
 
-                # ===== 投放(串口 + 三个投放口) =====
-                # 每个标靶流程:
-                #   ① A*飞到目标中心 → 中心对准(vision_reach_tol)
-                #   ② 机体已到中心 → 高空悬停, 采 drop_align_frames(10) 帧机体位置 → ★取中位数当基准点
-                #      (高空不飞投放口偏移点, 省时间; 投放口偏移对准留到低空)
-                #      (不取平均: 个别跳点会被平均拉偏, 中位数最稳)
-                #   ③ 以 descent_speed 匀速降到 drop_height
-                #      (位置设定点自己按速度往下推; 直接给目标高度 PX4 会冲下去 → 水平偏移)
-                #   ④ 降落后先对准"记录的位置" → 【降落后】drop_final_tol(严格) + 速度刹住
-                #   ⑤ 串口投放(**一个目标只投一个口**, 同一口连发 drop_repeat 次)
-                #   ⑥ 原地停留 vision_hold_secs → 以 ascend_speed 升回探索高度
-                #   ⑦ 升到位后位置环悬停 ascend_hold_secs(2s) 稳定 → 才算"完成本趟"
-                #      → 恢复探索/视觉处理
-                # ★② ~ ⑦ 全程(vision_cb)**不处理任何视觉数据**: 否则同一物体的另一个
-                #   类别会被暂存, 本趟一结束立刻被当新目标 → 同一目标投第二次。
-                # 投放口相对机体位置(m, x前 y左), 按当前 yaw 旋转到雷达 SLAM 系;
-                # 三个口按"飞到的顺序"用 0→1→2(投放口编号, 与目标类别号无关)。
-                'use_serial': 1,                         # 1=真机: 节点启动即打开串口(打开后需等 serial_ready_secs 才能用); 0=仿真: 不连串口, 投放只打日志
-                'serial_port': '/dev/mcu',               # 串口设备名
-                'serial_baud': 115200,                   # 波特率
-                'serial_ready_secs': 3.0,                # 串口打开后要等多久才允许发送(真机 MCU 要求 3s)
-                'drop_hold_secs': 2.0,                   # 两次投放指令的最短间隔(原 send() 里的 sleep(1))
-                'bomb_offsets': '0,-0.1;0.1,0;0,0.1',    # 口0;口1;口2 相对机体位置 "x,y"(m)
-                'bomb_offsets_small': '0,-0.28;0.28,0;0,0.28',   # ★5号(最小标靶)专用: 补视觉偏差约8cm ✓ 别的目标用上面那套
-                # ★实物微调(机体系 x前/y左, m): 校掉"每次都往同一方向偏"的系统性误差。
-                #   例: 实物落在中心外 10cm(偏在机头方向) → 对应口填 "-0.10,0"
-                #       偏在机体左侧 8cm → 填 "0,-0.08"
+                'use_serial': 1,
+                'serial_port': '/dev/mcu',
+                'serial_baud': 115200,
+                'serial_ready_secs': 3.0,
+                'drop_hold_secs': 2.0,
+                'bomb_offsets': '0,-0.1;0.1,0;0,0.1',
+                'bomb_offsets_small': '0,-0.28;0.28,0;0,0.28',
                 'bomb_trim': '0,0;0,0;0,0',
-                'bomb_y_sign': 1.0,                      # 机体y轴方向(ROS左正=+1) —— 不动它
-                # ★基准点来源开关: 0=机位中位数(旧版, 实测"一定会飞偏移");
-                #   1=视觉坐标中位数(理论最准"投放口压标靶", 但取决于视觉坐标精度)
-                'drop_base_from_vision': 1,    # ★1=基准点用【视觉坐标】→ 偏移是(x,y)合成方向(含机体离目标的残留距离); 0=用机体位置(只会飞纯口偏移 ✗)
-                'drop_final_tol': 0.04,   # ★低空: 降落后对准判据(m)
-                'drop_final_tol_small': 0.040,      # ★5号(最小标靶)专用: 比别的类别更严(别的 0.04) ✓
-                'drop_relax_mult_small': 1.5,     # ★5号专用: 超时放宽倍数(别的类别 3.0) → 宁可多等也不投偏 ✓
-                'drop_height': 0.12,   # ★降落到的高度(世界系, m)
-                'land_settle_secs': 0.5,                # ★最终降落到点后, 先"位置环悬停对准"保持这么久再调 land 降落
-                                                         #  (和投放前的 drop_settle_secs 一个思路; 0=不保持, 到点直接降)
-                'descent_speed': 0.4,                    # ★降落速度(m/s): 别太快, 否则降落后偏得多
-                'ascend_speed': 0.4,                     # ★投放后升回探索高度的速度(m/s); 升到位才算完成本趟(不会边爬边飞下一个)
-                'ascend_hold_secs': 1.0,                 # ★升回探索高度后"位置环悬停"稳定时长(s), 之后才恢复探索/飞下一个目标
-                'drop_align_frames': 25,                 # ★10→25: 降落前记录对准位置取 25 帧中位数(5号框小抖, 多帧更稳 ✓)
-                'drop_try_secs': 1.2,                   # ★只给"低空严格对准"计时(从到达降落高度开始): 超时放宽到3倍容差投放; 再超3倍放弃
-                'drop_vel_tol': 0.12,                    # 投放前速度刹住判定(m/s)
-                'drop_settle_secs': 0.2,                 # ★【低空/投放前】在降落高度上"位置+高度+速度都达标"持续这么久才投放=给无人机这段时间继续对准
-                'drop_height_tol': 0.05,                 # ★"到降落高度"判定(m): 高度没到位绝对不投放(只会继续对准/等待)
-                # ★投放判据(低空投放专用): 1=只看水平(x,y)对准 —— 连续 drop_xy_hold_ticks 个
-                #   控制帧(50Hz, 20帧≈0.4s)内 x,y 误差都 < drop_final_tol 就投放,
-                #   忽略【高度差 dz】与【刹车速度 v】。理由: 投放高度很低(0.12m), 炸弹近似
-                #   直线下落, 不会被机身晃动甩偏 → 比等"高度+水平+速度+稳定"快很多。
-                #   0 = 旧行为(三条件 + drop_settle_secs + 超时放宽兜底)
+                'bomb_y_sign': 1.0,
+                'drop_base_from_vision': 1,
+                'drop_final_tol': 0.04,
+                'drop_final_tol_small': 0.040,
+                'drop_relax_mult_small': 1.5,
+                'drop_height': 0.12,
+                'land_settle_secs': 0.5,
+                'descent_speed': 0.4,
+                'ascend_speed': 0.4,
+                'ascend_hold_secs': 1.0,
+                'drop_align_frames': 25,
+                'drop_try_secs': 1.2,
+                'drop_vel_tol': 0.12,
+                'drop_settle_secs': 0.2,
+                'drop_height_tol': 0.05,
                 'drop_xy_only': 0,
-                'drop_xy_hold_ticks': 20,                # 连续多少控制帧(50Hz)才算对准; 20帧≈0.4s
-                # ★低空对准伺服参数(位置环是纯P, 有持续扰动时稳态误差≈扰动/增益):
-                #   kff 越大 → 抗风/抗倾角分量越强, "降落后还差十几厘米"越少
-                'drop_align_kff': 1.0,   # 误差→速度前馈增益(1/s): 1.0=旧版力度(够用)
-                                                         #  调大(2~3)可进一步缩小"降落后还差十几厘米"的稳态偏差, 但可能过冲
-                'drop_align_vmax': 0.30,   # 低空横向限速(m/s) (0.30=旧版)
-                # ★下降末段是否提前开始横向偏移: 0=关闭(严格"降完再偏移");
-                #   >0 = 距投放高度还剩这么多米时就开始飞偏移(同时继续下降) ——
-                #   缓解"实际高度最后几厘米 settle 要好几秒、看着像原地不动"。
-                'drop_offset_start_dz': 0.0,     # (已改为: 下降全程都飞偏移, 此参数不再需要)
-                'drop_repeat': 2,                        # ★投放时同一个口连发几次(防止单次指令没被 MCU 触发)
-                'drop_repeat_gap_ms': 2000,              # 连发之间的间隔(ms)
-                'drop_ignore_radius': 1.2,               # ★飞机还在投放点这么近时, 视觉数据一律不记录(m): 近距离投影可能偏>1m, 单靠位置去重会漏
-                'drop_ignore_secs': 5.0,                # ★上面这条的生效时长(s), 避免以后路过同一片区域一直不记录
+                'drop_xy_hold_ticks': 20,
+                'drop_align_kff': 1.0,
+                'drop_align_vmax': 0.30,
+                'drop_offset_start_dz': 0.0,
+                'drop_repeat': 2,
+                'drop_repeat_gap_ms': 2000,
+                'drop_ignore_radius': 1.2,
+                'drop_ignore_secs': 5.0,
             }],
         ),
     ])
