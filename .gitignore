@@ -55,3 +55,6 @@ nvd.txt
 
 # keep the airframe photo used by README
 !docs/drone.jpg
+
+# local SSH key used for pushing to GitHub (never commit)
+.ssh_github/
