@@ -58,3 +58,6 @@ nvd.txt
 
 # local SSH key used for pushing to GitHub (never commit)
 .ssh_github/
+
+# local clones of other repos (scratch)
+.clones/
